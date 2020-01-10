@@ -1,0 +1,57 @@
+commit 40995033812a13ad798fb3144313ddceeb46156a
+Author: Neil Horman <nhorman@tuxdriver.com>
+Date:   Tue Jun 17 15:45:52 2014 -0400
+
+    tmon: Check log file for common secuirty issues
+    
+    The tmon logging system blindly opens its log file on a static path, making it
+    very easy for someone to redirect that log information to inappropriate places
+    or overwrite other users data.  Do some easy checking to make sure we're not
+    logging to a symlink or a file owned by another user.
+    
+    Signed-off-by: Neil Horman <nhorman@tuxdriver.com>
+    CC: Zhang Rui <rui.zhang@intel.com>
+    CC: Jacob Pan <jacob.jun.pan@linux.intel.com>
+
+diff --git a/tools/thermal/tmon/tmon.c b/tools/thermal/tmon/tmon.c
+index b30f531..059e0be 100644
+--- a/tools/thermal/tmon/tmon.c
++++ b/tools/thermal/tmon/tmon.c
+@@ -142,6 +142,7 @@ static void start_syslog(void)
+ static void prepare_logging(void)
+ {
+ 	int i;
++	struct stat logstat;
+ 
+ 	if (!logging)
+ 		return;
+@@ -152,6 +153,29 @@ static void prepare_logging(void)
+ 		return;
+ 	}
+ 
++	if (lstat(TMON_LOG_FILE, &logstat) < 0) {
++		syslog(LOG_ERR, "Unable to stat log file %s\n", TMON_LOG_FILE);
++		fclose(tmon_log);
++		tmon_log = NULL;
++		return;
++	}
++
++	/* The log file must be a regular file owned by us */
++	if (S_ISLNK(logstat.st_mode)) {
++		syslog(LOG_ERR, "Log file is a symlink.  Will not log\n");
++		fclose(tmon_log);
++		tmon_log = NULL;
++		return;
++	}
++
++	if (logstat.st_uid != getuid()) {
++		syslog(LOG_ERR, "We don't own the log file.  Not logging\n");
++		fclose(tmon_log);
++		tmon_log = NULL;
++		return;
++	}
++
++
+ 	fprintf(tmon_log, "#----------- THERMAL SYSTEM CONFIG -------------\n");
+ 	for (i = 0; i < ptdata.nr_tz_sensor; i++) {
+ 		char binding_str[33]; /* size of long + 1 */
